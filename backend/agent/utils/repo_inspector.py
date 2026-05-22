@@ -313,17 +313,23 @@ def fetch_maintenance_metrics(repo: Repository) -> dict[str, Any]:
 
 
 def _is_test_file(path: str) -> bool:
-    return (
-        path.endswith("_test.py")
-        or path.endswith("_test.go")
-        or (path.startswith("test_") and (path.endswith(".py") or path.endswith(".rb")))
-        or ".test." in path
-        or ".spec." in path
-        or "/tests/" in path
-        or "/test/" in path
-        or "/__tests__/" in path
-        or "/spec/" in path
-    )
+    segments = path.split("/")
+
+    if any(seg in TEST_DIR_NAMES for seg in segments):
+        return True
+
+    basename = segments[-1] if segments else path
+
+    if basename.startswith("test_") and basename.endswith((".py", ".rb", ".go", ".js", ".ts")):
+        return True
+
+    if basename.endswith(("_test.py", "_test.go")):
+        return True
+
+    if ".test." in basename or ".spec." in basename:
+        return True
+
+    return False
 
 
 def _is_source_file(path: str) -> bool:

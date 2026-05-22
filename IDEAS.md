@@ -25,3 +25,12 @@
 
 No idea evaluation during V1 sprint (May 22 - June 5).
 After V1 ships, re-read this file, re-prioritize, pick top 2 for V2.
+
+---
+
+## Known bugs (to fix in Day 11-12 polish)
+
+- **Large-repo file tree truncation**: GitHub API truncates `get_git_tree` results on repos with thousands of files (e.g. fastapi). Testing audit currently miscounts test files for such repos. Fix options:
+  1. Implement pagination via `git/trees/{sha}?recursive=1` with multiple calls
+  2. Add a fallback that uses GitHub's search API for test file count
+  3. Detect truncation and warn the user in the audit output

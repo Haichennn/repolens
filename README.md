@@ -2,6 +2,8 @@
 
 > Agentic AI system that audits any GitHub repository across architecture, security, documentation, maintenance, and testing dimensions.
 
+[![CI](https://github.com/Haichennn/repolens/actions/workflows/ci.yml/badge.svg)](https://github.com/Haichennn/repolens/actions/workflows/ci.yml)
+
 ## Live Demo
 
 **Try it live:** [repolens-audit.vercel.app](https://repolens-audit.vercel.app)

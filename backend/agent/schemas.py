@@ -59,6 +59,48 @@ class ArchitectureAudit(AuditResult):
     )
 
 
+class MaintenanceAudit(AuditResult):
+    days_since_last_commit: int | None = Field(
+        default=None,
+        description="Number of days since the most recent commit",
+    )
+    commits_last_90_days: int = Field(
+        default=0,
+        description="Commit count over the past 90 days",
+    )
+    top_contributor_share: float | None = Field(
+        default=None,
+        description=(
+            "Fraction (0-1) of commits by the top contributor across the "
+            "project's history. High share suggests bus factor risk."
+        ),
+    )
+    total_contributors: int = Field(
+        default=0,
+        description="Total number of unique contributors",
+    )
+    open_issues_count: int = Field(
+        default=0,
+        description="Number of currently open issues",
+    )
+    has_recent_releases: bool = Field(
+        default=False,
+        description="Whether at least one release exists in the past 12 months",
+    )
+    stars: int = Field(
+        default=0,
+        description="GitHub stars (popularity context, not part of score)",
+    )
+    forks: int = Field(
+        default=0,
+        description="GitHub forks (downstream usage signal, not part of score)",
+    )
+    watchers: int = Field(
+        default=0,
+        description="GitHub watchers",
+    )
+
+
 class RepoAuditReport(BaseModel):
     repo_url: str
     owner: str
@@ -66,7 +108,7 @@ class RepoAuditReport(BaseModel):
     documentation: DocumentationAudit | None = None
     architecture: ArchitectureAudit | None = None
     security: AuditResult | None = None
-    maintenance: AuditResult | None = None
+    maintenance: MaintenanceAudit | None = None
     testing: AuditResult | None = None
     overall_score: int | None = Field(default=None, ge=0, le=100)
     overall_severity: Severity | None = None

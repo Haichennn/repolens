@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -179,12 +181,118 @@ def fetch_repo_structure(url: str) -> dict[str, Any]:
     }
 
 
+def fetch_maintenance_metrics(repo: Repository) -> dict[str, Any]:
+    """
+    Collect maintenance + popularity metrics from a PyGithub Repository object.
+    All values are best-effort; on partial failure return None or sensible defaults.
+    """
+    now = datetime.now(timezone.utc)
+    ninety_days_ago = now - timedelta(days=90)
+    one_year_ago = now - timedelta(days=365)
+
+    result: dict[str, Any] = {
+        "days_since_last_commit": None,
+        "commits_last_90_days": 0,
+        "total_contributors": 0,
+        "top_contributor_share": None,
+        "open_issues_count": 0,
+        "recent_releases": [],
+        "has_recent_releases": False,
+        "last_commit_iso": None,
+        "last_commit_message": None,
+        "stars": 0,
+        "forks": 0,
+        "watchers": 0,
+    }
+
+    try:
+        result["stars"] = repo.stargazers_count
+        result["forks"] = repo.forks_count
+        result["watchers"] = repo.subscribers_count
+    except GithubException as exc:
+        print(f"[repo_inspector] popularity metrics failed: {exc}", file=sys.stderr)
+
+    try:
+        commits_iter = iter(repo.get_commits())
+        first_commit = next(commits_iter, None)
+        if first_commit is not None:
+            commit_date = first_commit.commit.author.date
+            if commit_date.tzinfo is None:
+                commit_date = commit_date.replace(tzinfo=timezone.utc)
+            result["last_commit_iso"] = commit_date.isoformat()
+            result["days_since_last_commit"] = (now - commit_date).days
+            subject = first_commit.commit.message.split("\n", 1)[0]
+            if len(subject) > 200:
+                subject = subject[:200]
+            result["last_commit_message"] = subject
+    except GithubException as exc:
+        print(f"[repo_inspector] last commit fetch failed: {exc}", file=sys.stderr)
+
+    try:
+        count = 0
+        for _ in repo.get_commits(since=ninety_days_ago):
+            count += 1
+            if count >= 500:
+                break
+        result["commits_last_90_days"] = count
+    except GithubException as exc:
+        print(f"[repo_inspector] 90-day commit count failed: {exc}", file=sys.stderr)
+
+    try:
+        contributions: list[int] = []
+        for i, contributor in enumerate(repo.get_contributors()):
+            if i >= 30:
+                break
+            contributions.append(contributor.contributions)
+        if contributions:
+            result["total_contributors"] = len(contributions)
+            total = sum(contributions)
+            if total > 0:
+                result["top_contributor_share"] = max(contributions) / total
+    except GithubException as exc:
+        print(f"[repo_inspector] contributors fetch failed: {exc}", file=sys.stderr)
+
+    try:
+        result["open_issues_count"] = repo.open_issues_count
+    except GithubException as exc:
+        print(f"[repo_inspector] open issues count failed: {exc}", file=sys.stderr)
+
+    try:
+        recent_releases: list[dict[str, Any]] = []
+        any_recent = False
+        for i, release in enumerate(repo.get_releases()):
+            if i >= 5:
+                break
+            published = release.created_at
+            published_iso: str | None = None
+            if published is not None:
+                if published.tzinfo is None:
+                    published = published.replace(tzinfo=timezone.utc)
+                published_iso = published.isoformat()
+                if published >= one_year_ago:
+                    any_recent = True
+            recent_releases.append(
+                {
+                    "tag_name": release.tag_name,
+                    "published_at_iso": published_iso,
+                    "name": release.title,
+                }
+            )
+        result["recent_releases"] = recent_releases
+        result["has_recent_releases"] = any_recent
+    except GithubException as exc:
+        print(f"[repo_inspector] releases fetch failed: {exc}", file=sys.stderr)
+
+    return result
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python -m agent.utils.repo_inspector <github_repo_url>")
         sys.exit(1)
 
-    structure = fetch_repo_structure(sys.argv[1])
+    url = sys.argv[1]
+    structure = fetch_repo_structure(url)
 
     if "error" in structure:
         print(f"❌ Error: {structure['error']}")
@@ -206,3 +314,13 @@ if __name__ == "__main__":
             print(f"### {path}")
             print(content)
             print()
+
+    print("── Maintenance metrics ───────────")
+    try:
+        token = os.getenv("GITHUB_TOKEN")
+        gh = Github(token) if token else Github()
+        repo = gh.get_repo(f"{structure['owner']}/{structure['repo_name']}")
+        metrics = fetch_maintenance_metrics(repo)
+        print(json.dumps(metrics, indent=2, default=str))
+    except GithubException as exc:
+        print(f"❌ Maintenance metrics failed: {exc}")

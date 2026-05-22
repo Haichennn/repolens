@@ -1,82 +1,63 @@
 # Repolens Roadmap
 
-## V1 (current sprint — May 22 to June 5, 2026)
+## V1 — current sprint (May 22 to June 5, 2026)
 Single-repo audit across 5 dimensions, delivered as an interactive dashboard.
 
 - [x] Day 1: Scaffold + LangChain hello-world agent
-- [x] Day 2: First LangGraph workflow (state, nodes, edges)
+- [x] Day 2: First LangGraph workflow
 - [x] Day 3: Pydantic schemas + Documentation audit
-- [x] Day 4 (part 1): Architecture audit + repo_inspector utility
-- [ ] Day 4 (part 2-4): Maintenance, Testing audits
+- [x] Day 4 part 1: Architecture audit + repo_inspector
+- [ ] Day 4 part 2-4: Maintenance, Testing audits
 - [ ] Day 5: MCP server (CVE + package registry) + Security audit
-- [ ] Day 6: LangGraph orchestration (5 parallel sub-agents + conditional flow)
-- [ ] Day 7: Backend deployed (Railway)
-- [ ] Day 8-10: Next.js frontend with drill-down dashboard
-- [ ] Day 11-12: Polish + production-ready deploy
+- [ ] Day 6: LangGraph orchestration (5 parallel sub-agents)
+- [ ] Day 7: Backend deployed
+- [ ] Day 8-10: Next.js drill-down dashboard
+- [ ] Day 11-12: Polish + production deploy
 - [ ] Day 13: Case study + showcase PDF
 - [ ] Day 14: Final demo + portfolio integration
 
-## V2 (post-launch, July 2026+)
+---
 
-The audit pattern in V1 evaluates **one repo against absolute criteria**. V2 evolves it into **decision-support for selecting between alternatives** — the actual pain engineers face when picking dependencies.
+## V2 — post-launch (planned start: August 2026)
 
-- [ ] **Comparative ranking** — given a category or seed repo, find and rank similar alternatives
-  - Use case: "Find alternatives to LangChain" → ranked comparison matrix
-  - Surfaces: popularity (stars, forks), maintenance health, community signals, technical fit
-  - Auto-discover candidates via GitHub topics + similar-repo heuristics
+The audit pattern in V1 evaluates **one repo against absolute criteria**. V2 evolves it into **decision-support for real engineering workflows** — the actual moments where engineers need a tool like this.
 
-- [ ] **Beginner-friendliness audit** — separate dimension evaluating learnability for newcomers
-  - Signals: quickstart presence, examples folder, "good first issue" count, community channels, error message quality, type hint coverage, tutorial links
+### V2 ship commitment
 
-- [ ] **API design audit** — evaluate API surface quality
-  - Routing pattern detection (REST vs GraphQL vs RPC, versioning strategy)
-  - Public API surface summary (endpoints, key methods, learning curve)
-  - Internal architecture signals (error handling consistency, auth mechanism, rate limiting)
+I commit to shipping the top 2 features below. The remaining 3 are in the backlog and will be evaluated based on user feedback from the first two.
 
-- [ ] **Audit history per repo** — track score evolution over time, surface regressions
-- [ ] **Custom audit dimensions** — user-defined rubrics for domain-specific evaluation
-- [ ] **CI integration** — webhook-based audit-on-PR
+### V2 priority backlog (ranked by engineer pain × shippability)
 
-## V3 (vision)
+**1. Decision Memo Generator** (priority pick)
+Generate a markdown decision document comparing 2-N repos for a specific use case. Output is paste-ready for Notion, RFCs, internal wikis.
+- Input: 2-N repo URLs + decision context ("we need a RAG framework for legal docs")
+- Output: comparison table + risk assessment + recommendation + open questions
+- Why first: engineers hate writing decision docs; a 95%-written draft is pure value
 
-Repolens becomes a **dependency due-diligence platform**: paste a `package.json` or `requirements.txt`, get an audit of every dependency's health, security, and trajectory. The single-repo audit and comparative ranking become primitives composed into higher-level decision workflows.
+**2. Dependency Due-Diligence** (priority pick)
+Audit a single package by name (not just repo URL). Run before adding a new dependency to production.
+- Input: package name + ecosystem (npm, PyPI, etc.)
+- Output: full Repolens audit + license risk + transitive dependency footprint + security incident history
+- Why second: extends Repolens input beyond repo URLs, opening 10× the use cases
+
+### V2 backlog (evaluate after first two ship)
+
+**3. Onboarding Tour Guide**
+Generate a reading-order roadmap for an unfamiliar repo, including entry points, hot files, and danger zones.
+
+**4. Comparative Ranking**
+Find and rank alternatives to a seed repo, surfaced as a comparison matrix.
+
+**5. Maintainer Culture Audit**
+Evaluate social/communication health of a project for prospective contributors.
+
+### V2 cross-cutting improvements (always-on, no separate ship)
+
+- Beginner-friendliness signals folded into the Documentation audit
+- API design signals folded into the Architecture audit
 
 ---
 
-## V2 detailed feature backlog
+## V3 — vision
 
-Ranked by combined "real engineer pain" × "shippable on this infrastructure":
-
-### Decision Memo Generator (highest priority)
-Generate a markdown decision document comparing 2-N repos for a specific use case. Output is paste-ready for Notion, internal wikis, or engineering RFCs.
-- Input: 2-N repo URLs + decision context ("we need a RAG framework for legal docs")
-- Output: comparison table + risk assessment + recommendation + open questions
-
-### Dependency Due-Diligence
-Audit a single package by name (not just repo URL). Useful before adding a new dependency to production.
-- Input: package name + ecosystem (npm, PyPI, etc.)
-- Output: full Repolens audit + license risk + transitive dependency footprint
-
-### Comparative Ranking
-Find and rank alternatives to a seed repo, surfaced as a ranked comparison matrix.
-- Input: seed repo OR category query
-- Output: ranked list with comparison axes (popularity, maintenance, learning curve)
-
-### Onboarding Tour Guide
-Generate a reading-order roadmap for a repo, including entry points, hot files, and danger zones.
-- Input: repo URL + role context ("I'm joining as a backend dev")
-- Output: ordered file list with reasoning + architectural pattern identification
-
-### Maintainer Culture Audit
-Evaluate the social/communication health of a project for prospective contributors or maintainers.
-- Signals: response time, welcome posture (CONTRIBUTING.md, good-first-issue tags), bus factor
-
-### Beginner-Friendliness Audit
-Separate dimension evaluating learnability for newcomers.
-- Signals: quickstart presence, examples folder, "good first issue" count, community channels, type hint coverage
-
-### API Design Audit
-Evaluate API surface quality.
-- Routing pattern detection (REST vs GraphQL vs RPC, versioning strategy)
-- Public API surface summary
-- Internal architecture signals (error handling, auth, rate limiting)
+Repolens becomes a **dependency due-diligence platform**: paste a `package.json` or `requirements.txt`, get an audit of every dependency's health, security, and trajectory. The single-repo audit and comparative ranking become primitives composed into higher-level decision workflows.

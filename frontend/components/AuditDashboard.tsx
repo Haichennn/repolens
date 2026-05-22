@@ -31,6 +31,25 @@ export type RepoAuditReport = {
   security: AuditDimensionResult | null;
 };
 
+export type Verdict = "adopt" | "adopt_with_caution" | "pass";
+
+export type DecisionMemo = {
+  repo_url: string;
+  overall_score: number;
+  verdict: Verdict;
+  verdict_rationale: string;
+  strengths: string[];
+  concerns: string[];
+  next_steps_if_adopting: string[];
+  red_flags_to_monitor: string[];
+};
+
+export type MemoState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "complete"; memo: DecisionMemo }
+  | { status: "error"; error: string };
+
 export type AuditSession = {
   id: string;
   repoUrl: string;
@@ -48,6 +67,8 @@ export type AuditSession = {
   };
   overallScore: number | null;
   overallSeverity: Severity | null;
+
+  memo: MemoState;
 
   error?: string;
 };
@@ -70,6 +91,18 @@ function severityLabel(severity: Severity | null, status: AuditSession["status"]
   if (status === "error") return "ERROR";
   if (status === "running") return "RUNNING";
   return "PENDING";
+}
+
+function verdictColor(verdict: Verdict): string {
+  if (verdict === "adopt") return "oklch(0.65 0.12 150)"; // sage green
+  if (verdict === "adopt_with_caution") return "oklch(0.7 0.15 50)"; // burnt orange
+  return "oklch(0.6 0.2 25)"; // red — pass
+}
+
+function verdictLabel(verdict: Verdict): string {
+  if (verdict === "adopt") return "ADOPT";
+  if (verdict === "adopt_with_caution") return "ADOPT WITH CAUTION";
+  return "PASS";
 }
 
 function shortRepoLabel(url: string): string {
@@ -218,7 +251,190 @@ function AuditRow({
   );
 }
 
-function SessionPanel({ session }: { session: AuditSession }) {
+function MemoCard({ memo }: { memo: DecisionMemo }) {
+  const color = verdictColor(memo.verdict);
+  const showNextSteps =
+    memo.verdict === "adopt" || memo.verdict === "adopt_with_caution";
+
+  return (
+    <div
+      className="border-t border-white/[0.06] border-l-2 px-5 py-5"
+      style={{
+        borderLeftColor: color,
+        background: "oklch(1 0 0 / 0.015)",
+      }}
+    >
+      {/* Verdict pill + section label */}
+      <div className="mb-4 flex items-center gap-3">
+        <span
+          className="rounded-sm px-2.5 py-1 font-mono text-[11px] tracking-[0.1em]"
+          style={{
+            color: color,
+            border: `1px solid ${color}`,
+            background: "oklch(1 0 0 / 0.02)",
+          }}
+        >
+          {verdictLabel(memo.verdict)}
+        </span>
+        <span className="font-mono text-[11px] tracking-[0.1em] text-muted-foreground/50">
+          DECISION MEMO
+        </span>
+      </div>
+
+      {/* Verdict rationale — the punch line */}
+      <p className="mb-6 text-[15px] italic leading-relaxed text-foreground/85">
+        {memo.verdict_rationale}
+      </p>
+
+      {/* Strengths */}
+      <div className="mb-5">
+        <div className="mb-2 font-mono text-[11px] tracking-[0.1em] text-muted-foreground/50">
+          STRENGTHS
+        </div>
+        <ul className="space-y-1.5 text-[14px] leading-relaxed text-foreground/80">
+          {memo.strengths.map((s, i) => (
+            <li key={i} className="flex gap-2">
+              <span
+                className="flex-shrink-0 select-none"
+                style={{ color: verdictColor("adopt") }}
+              >
+                ·
+              </span>
+              <span>{s}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      {/* Concerns */}
+      <div className="mb-5">
+        <div className="mb-2 font-mono text-[11px] tracking-[0.1em] text-muted-foreground/50">
+          CONCERNS
+        </div>
+        <ul className="space-y-1.5 text-[14px] leading-relaxed text-foreground/80">
+          {memo.concerns.map((c, i) => (
+            <li key={i} className="flex gap-2">
+              <span
+                className="flex-shrink-0 select-none"
+                style={{ color: verdictColor("adopt_with_caution") }}
+              >
+                ·
+              </span>
+              <span>{c}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      {/* Next steps if adopting — only shown for adopt or adopt_with_caution */}
+      {showNextSteps && (
+        <div className="mb-5">
+          <div className="mb-2 font-mono text-[11px] tracking-[0.1em] text-muted-foreground/50">
+            NEXT STEPS IF ADOPTING
+          </div>
+          <ol className="space-y-1.5 text-[14px] leading-relaxed text-foreground/80">
+            {memo.next_steps_if_adopting.map((step, i) => (
+              <li key={i} className="flex gap-2">
+                <span className="flex-shrink-0 select-none text-muted-foreground/40">→</span>
+                <span>{step}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+
+      {/* Red flags to monitor */}
+      <div>
+        <div className="mb-2 font-mono text-[11px] tracking-[0.1em] text-muted-foreground/50">
+          RED FLAGS TO MONITOR
+        </div>
+        <ul className="space-y-1.5 text-[14px] leading-relaxed text-foreground/80">
+          {memo.red_flags_to_monitor.map((flag, i) => (
+            <li key={i} className="flex gap-2">
+              <span
+                className="flex-shrink-0 select-none"
+                style={{ color: verdictColor("pass") }}
+              >
+                ·
+              </span>
+              <span>{flag}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+function MemoControl({
+  session,
+  onGenerateMemo,
+}: {
+  session: AuditSession;
+  onGenerateMemo: (sessionId: string) => void;
+}) {
+  if (session.status !== "complete") return null;
+
+  if (session.memo.status === "complete") {
+    return <MemoCard memo={session.memo.memo} />;
+  }
+
+  if (session.memo.status === "loading") {
+    return (
+      <div className="border-t border-white/[0.06] px-5 py-4">
+        <div className="mb-2 font-mono text-[13px] text-muted-foreground/70">
+          generating decision memo...
+        </div>
+        <div className="relative h-[3px] w-full overflow-hidden bg-white/[0.05]">
+          <div
+            className="absolute inset-y-0 w-1/3"
+            style={{
+              background:
+                "linear-gradient(90deg, transparent, oklch(0.7 0 0 / 0.6), transparent)",
+              animation: "scan 1.6s linear infinite",
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (session.memo.status === "error") {
+    return (
+      <div className="border-t border-white/[0.06] px-5 py-4 font-mono text-[13px]">
+        <div className="mb-2 text-red-400/80">
+          memo error: {session.memo.error}
+        </div>
+        <button
+          type="button"
+          onClick={() => onGenerateMemo(session.id)}
+          className="text-muted-foreground/70 underline-offset-2 transition-colors hover:text-foreground hover:underline"
+        >
+          retry
+        </button>
+      </div>
+    );
+  }
+
+  // idle
+  return (
+    <button
+      type="button"
+      onClick={() => onGenerateMemo(session.id)}
+      className="w-full border-t border-white/[0.06] px-5 py-4 text-left font-mono text-[13px] text-muted-foreground/80 transition-colors hover:bg-white/[0.02] hover:text-foreground apple-ease"
+    >
+      generate decision memo →
+    </button>
+  );
+}
+
+function SessionPanel({
+  session,
+  onGenerateMemo,
+}: {
+  session: AuditSession;
+  onGenerateMemo: (sessionId: string) => void;
+}) {
   const [expanded, setExpanded] = useState<Set<DimensionName>>(new Set());
   const [, setTick] = useState(0);
 
@@ -279,19 +495,32 @@ function SessionPanel({ session }: { session: AuditSession }) {
           />
         ))}
       </div>
+
+      {/* Memo control — button, loading, error, or rendered memo */}
+      <MemoControl session={session} onGenerateMemo={onGenerateMemo} />
     </div>
   );
 }
 
 // ─────────── Main exported component ───────────
 
-export function AuditDashboard({ audits }: { audits: AuditSession[] }) {
+export function AuditDashboard({
+  audits,
+  onGenerateMemo,
+}: {
+  audits: AuditSession[];
+  onGenerateMemo: (sessionId: string) => void;
+}) {
   if (audits.length === 0) return null;
 
   return (
     <div className="space-y-4">
       {audits.map((session) => (
-        <SessionPanel key={session.id} session={session} />
+        <SessionPanel
+          key={session.id}
+          session={session}
+          onGenerateMemo={onGenerateMemo}
+        />
       ))}
     </div>
   );

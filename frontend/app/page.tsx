@@ -5,6 +5,7 @@ import {
   AuditDashboard,
   type AuditDimensionResult,
   type AuditSession,
+  type DecisionMemo,
   type DimensionName,
 } from "@/components/AuditDashboard";
 import { Input } from "@/components/ui/input";
@@ -38,6 +39,7 @@ export default function Home() {
       },
       overallScore: null,
       overallSeverity: null,
+      memo: { status: "idle" },
     };
 
     setAudits((prev) => [newSession, ...prev]);
@@ -128,6 +130,57 @@ export default function Home() {
       });
       eventSource.close();
     };
+  }
+
+  async function runMemo(sessionId: string) {
+    const session = audits.find((a) => a.id === sessionId);
+    if (!session || session.status !== "complete") return;
+    if (session.overallScore === null || session.overallSeverity === null) return;
+
+    setAudits((prev) =>
+      prev.map((a) =>
+        a.id === sessionId ? { ...a, memo: { status: "loading" } } : a
+      )
+    );
+
+    const report = {
+      repo_url: session.repoUrl,
+      owner: session.repoMeta?.owner ?? "",
+      repo_name: session.repoMeta?.repo_name ?? "",
+      documentation: session.dimensions.documentation,
+      architecture: session.dimensions.architecture,
+      maintenance: session.dimensions.maintenance,
+      testing: session.dimensions.testing,
+      security: session.dimensions.security,
+      overall_score: session.overallScore,
+      overall_severity: session.overallSeverity,
+    };
+
+    try {
+      const res = await fetch(`${API_BASE}/memo`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(report),
+      });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const memo = (await res.json()) as DecisionMemo;
+      setAudits((prev) =>
+        prev.map((a) =>
+          a.id === sessionId ? { ...a, memo: { status: "complete", memo } } : a
+        )
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      setAudits((prev) =>
+        prev.map((a) =>
+          a.id === sessionId
+            ? { ...a, memo: { status: "error", error: message } }
+            : a
+        )
+      );
+    }
   }
 
   return (
@@ -232,7 +285,7 @@ export default function Home() {
       {/* Audit dashboard — only shown when audits exist */}
       {audits.length > 0 && (
         <section className="relative z-10 mx-auto max-w-6xl px-6 pb-32">
-          <AuditDashboard audits={audits} />
+          <AuditDashboard audits={audits} onGenerateMemo={runMemo} />
         </section>
       )}
 

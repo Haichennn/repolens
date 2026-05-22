@@ -61,3 +61,13 @@ Evaluate social/communication health of a project for prospective contributors.
 ## V3 — vision
 
 Repolens becomes a **dependency due-diligence platform**: paste a `package.json` or `requirements.txt`, get an audit of every dependency's health, security, and trajectory. The single-repo audit and comparative ranking become primitives composed into higher-level decision workflows.
+
+---
+
+## V3 Vision (post-V2 ship)
+
+**Audit history + score trajectory**
+Users often re-audit the same repo iteratively as they fix issues. Track audits per repo over time, render score curves, surface "improved by X points" deltas. Persistence layer (Postgres) required.
+
+**Repolens as Claude Skill**
+Package Repolens as an installable Skill so users can audit and surface findings inside their existing IDE (Cursor, Claude Code, Codex) without context switching. The web UI stays as demo and standalone tool; the Skill is the daily-driver distribution channel.

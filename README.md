@@ -31,14 +31,26 @@ This repo is a monorepo with two components:
 
 ```
 repolens/
-├── backend/        Python · FastAPI · LangGraph · MCP server (Anthropic Model Context Protocol)
-└── frontend/       Next.js · TypeScript · Tailwind · shadcn/ui
+├── backend/        Python · FastAPI · LangGraph · MCP server
+├── frontend/       Next.js · TypeScript · Tailwind · shadcn/ui
+└── skills/         Claude Skill for invoking Repolens from IDE
 ```
 
 backend is deployed on Railway via Docker: https://repolens-production-61e0.up.railway.app
 frontend is deployed on Vercel (see Live Demo above)
 
 Each can be developed independently. The frontend calls the backend's `/audit` endpoint over HTTPS.
+
+## Claude Skill
+
+Repolens ships as a Claude Skill for use inside Cursor, Claude Code, and other Skill-aware AI coding tools. Install the skill and audit repos without leaving your editor:
+
+```
+You: "Audit github.com/fastapi/fastapi"
+Claude: [Calls Repolens, returns 5-dimensional audit]
+```
+
+See `skills/repolens/` for installation.
 
 ## Quick Start
 

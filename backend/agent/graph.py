@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import Optional, TypedDict
+from typing import Any, Optional, TypedDict
 
 from dotenv import load_dotenv
 from github import Github, GithubException
@@ -179,18 +180,128 @@ def build_graph():
 app = build_graph()
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# Streaming API: per-node-completion events for SSE-style real-time UIs
+# ─────────────────────────────────────────────────────────────────────────
+
+_NODE_TO_STATE_KEY: dict[str, str] = {
+    "documentation": "documentation_audit",
+    "architecture": "architecture_audit",
+    "maintenance": "maintenance_audit",
+    "testing": "testing_audit",
+    "security": "security_audit",
+    "aggregate": "final_report",
+}
+
+
+def _extract_node_data(node_name: str, state_update: dict) -> Any:
+    """Map an astream event's state_update to the payload we emit for each node."""
+    if node_name == "fetch":
+        if "fetch_error" in state_update:
+            return {"error": state_update["fetch_error"]}
+        return {
+            "owner": state_update.get("owner"),
+            "repo_name": state_update.get("repo_name"),
+        }
+
+    key = _NODE_TO_STATE_KEY.get(node_name)
+    if key is not None:
+        return state_update.get(key)
+
+    return state_update
+
+
+async def audit_repo_streaming(repo_url: str) -> AsyncGenerator[dict, None]:
+    """
+    Stream per-node-completion events as the audit graph runs.
+
+    Yields dicts of shape::
+
+        {"type": "node_complete",
+         "node": "fetch" | "documentation" | "architecture" | "maintenance"
+                 | "testing" | "security" | "aggregate",
+         "data": <payload>}
+
+    Payloads:
+      - fetch:       {"owner": str, "repo_name": str} or {"error": str}
+      - audit nodes: the corresponding Pydantic model (DocumentationAudit, …)
+      - aggregate:   the full RepoAuditReport
+    """
+    initial_state: AuditState = {"repo_url": repo_url}
+
+    async for event in app.astream(initial_state):
+        # astream (default mode="updates") yields {node_name: state_update}
+        for node_name, state_update in event.items():
+            yield {
+                "type": "node_complete",
+                "node": node_name,
+                "data": _extract_node_data(node_name, state_update),
+            }
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# CLI
+# ─────────────────────────────────────────────────────────────────────────
+
+
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python -m agent.graph <github_url>")
+    args = sys.argv[1:]
+
+    if not args:
+        print("Usage:")
+        print("  python -m agent.graph <github_url>           # sync audit")
+        print("  python -m agent.graph --viz                  # print mermaid graph")
+        print("  python -m agent.graph --stream [github_url]  # streaming audit (debug)")
         sys.exit(1)
 
-    if len(sys.argv) >= 2 and sys.argv[1] in ("--viz", "--graph"):
+    if args[0] in ("--viz", "--graph"):
         print("Mermaid graph (paste into https://mermaid.live):")
         print()
         print(app.get_graph().draw_mermaid())
         sys.exit(0)
 
-    result = app.invoke({"repo_url": sys.argv[1]})
+    if args[0] == "--stream":
+        import asyncio
+        import time
+
+        stream_url = args[1] if len(args) > 1 else "https://github.com/fastapi/fastapi"
+        start = time.time()
+        print(f"Streaming audit of {stream_url}")
+        print()
+
+        async def _run_stream() -> None:
+            async for event in audit_repo_streaming(stream_url):
+                elapsed = time.time() - start
+                data = event.get("data")
+
+                if hasattr(data, "score") and hasattr(data, "severity"):
+                    summary = f"score={data.score:>3} severity={data.severity.value}"
+                elif hasattr(data, "overall_score") and hasattr(data, "overall_severity"):
+                    summary = (
+                        f"overall={data.overall_score}/100 "
+                        f"[{data.overall_severity.value}]"
+                    )
+                elif isinstance(data, dict):
+                    if "error" in data:
+                        summary = f"error: {data['error']}"
+                    else:
+                        summary = " ".join(f"{k}={v}" for k, v in data.items() if v is not None)
+                else:
+                    summary = "(no data)"
+
+                print(
+                    f"[+{elapsed:6.2f}s] {event['type']:14s} | "
+                    f"{event['node']:14s} | {summary}"
+                )
+
+        asyncio.run(_run_stream())
+        sys.exit(0)
+
+    if len(args) != 1:
+        print("Usage: python -m agent.graph <github_url>")
+        sys.exit(1)
+
+    result = app.invoke({"repo_url": args[0]})
 
     report = result.get("final_report")
     if report is None:

@@ -101,6 +101,40 @@ class MaintenanceAudit(AuditResult):
     )
 
 
+class TestingAudit(AuditResult):
+    has_tests_folder: bool = Field(
+        default=False,
+        description="Whether a recognizable tests directory exists",
+    )
+    test_file_count: int = Field(
+        default=0,
+        description="Number of test files detected by filename pattern",
+    )
+    source_file_count: int = Field(
+        default=0,
+        description="Number of source files detected (excluding tests, configs, docs)",
+    )
+    test_to_source_ratio: float | None = Field(
+        default=None,
+        description="Ratio of test files to source files; None if no source detected",
+    )
+    detected_test_frameworks: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Test frameworks detected from config files or filenames "
+            "(e.g. pytest, jest, vitest, mocha, junit)"
+        ),
+    )
+    has_ci_config: bool = Field(
+        default=False,
+        description="Whether CI/CD configuration exists",
+    )
+    has_coverage_badge: bool = Field(
+        default=False,
+        description="Whether README contains a coverage badge",
+    )
+
+
 class RepoAuditReport(BaseModel):
     repo_url: str
     owner: str
@@ -109,6 +143,6 @@ class RepoAuditReport(BaseModel):
     architecture: ArchitectureAudit | None = None
     security: AuditResult | None = None
     maintenance: MaintenanceAudit | None = None
-    testing: AuditResult | None = None
+    testing: TestingAudit | None = None
     overall_score: int | None = Field(default=None, ge=0, le=100)
     overall_severity: Severity | None = None

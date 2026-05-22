@@ -24,6 +24,32 @@ MAX_TREE_ENTRIES = 200
 MAX_CONFIG_FILE_CHARS = 2000
 MAX_WORKFLOW_FILES = 2
 
+TEST_DIR_NAMES = {"tests", "test", "__tests__", "spec", "specs"}
+SOURCE_EXTENSIONS = {
+    ".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".java", ".rs", ".rb",
+    ".kt", ".swift", ".cpp", ".cs",
+}
+IGNORED_FOR_SOURCE = {
+    "node_modules", ".git", "__pycache__", "venv", ".venv", "dist",
+    "build", ".next", "coverage", "docs",
+}
+
+CI_EXACT_PATHS = {
+    ".gitlab-ci.yml",
+    ".circleci/config.yml",
+    "Jenkinsfile",
+    "azure-pipelines.yml",
+    ".travis.yml",
+}
+
+COVERAGE_BADGE_SUBSTRINGS = [
+    "coveralls.io",
+    "codecov.io",
+    "shields.io/coverage",
+    "[![coverage",
+]
+COVERAGE_BADGE_RE = re.compile(r"coverage-\d", re.IGNORECASE)
+
 CONFIG_FILES = [
     "package.json",
     "pyproject.toml",
@@ -286,6 +312,172 @@ def fetch_maintenance_metrics(repo: Repository) -> dict[str, Any]:
     return result
 
 
+def _is_test_file(path: str) -> bool:
+    return (
+        path.endswith("_test.py")
+        or path.endswith("_test.go")
+        or (path.startswith("test_") and (path.endswith(".py") or path.endswith(".rb")))
+        or ".test." in path
+        or ".spec." in path
+        or "/tests/" in path
+        or "/test/" in path
+        or "/__tests__/" in path
+        or "/spec/" in path
+    )
+
+
+def _is_source_file(path: str) -> bool:
+    segments = path.split("/")
+    if any(seg in IGNORED_FOR_SOURCE for seg in segments):
+        return False
+    if _is_test_file(path):
+        return False
+    lower = path.lower()
+    return any(lower.endswith(ext) for ext in SOURCE_EXTENSIONS)
+
+
+def _detect_coverage_badge(readme_text: str) -> bool:
+    if not readme_text:
+        return False
+    lowered = readme_text.lower()
+    if any(s in lowered for s in COVERAGE_BADGE_SUBSTRINGS):
+        return True
+    return COVERAGE_BADGE_RE.search(readme_text) is not None
+
+
+def _detect_test_frameworks(
+    repo: Repository,
+    file_paths: list[str],
+    test_files: list[str],
+) -> list[str]:
+    frameworks: list[str] = []
+    file_set = set(file_paths)
+
+    def basename(p: str) -> str:
+        return p.rsplit("/", 1)[-1]
+
+    pytest_signal = (
+        "conftest.py" in file_set
+        or any(p.endswith("/conftest.py") for p in file_paths)
+    )
+    if not pytest_signal:
+        for cfg_path in ("pytest.ini", "pyproject.toml", "setup.cfg"):
+            content = _try_get_file_content(repo, cfg_path)
+            if content and "pytest" in content.lower():
+                pytest_signal = True
+                break
+    if pytest_signal:
+        frameworks.append("pytest")
+
+    if any("unittest" in p for p in test_files):
+        frameworks.append("unittest")
+
+    jest_signal = any(basename(p).startswith("jest.config.") for p in file_paths)
+    if not jest_signal:
+        pkg = _try_get_file_content(repo, "package.json")
+        if pkg and "jest" in pkg.lower():
+            jest_signal = True
+    if jest_signal:
+        frameworks.append("jest")
+
+    if any(basename(p).startswith("vitest.config.") for p in file_paths):
+        frameworks.append("vitest")
+
+    if any(basename(p).startswith(".mocharc.") for p in file_paths):
+        frameworks.append("mocha")
+
+    if any(basename(p).startswith("playwright.config.") for p in file_paths):
+        frameworks.append("playwright")
+
+    cypress_signal = any(basename(p).startswith("cypress.config.") for p in file_paths)
+    if not cypress_signal:
+        cypress_signal = any(
+            p == "cypress" or p.startswith("cypress/") or "/cypress/" in p
+            for p in file_paths
+        )
+    if cypress_signal:
+        frameworks.append("cypress")
+
+    if any(p.endswith("_test.go") for p in file_paths):
+        frameworks.append("go test")
+
+    has_maven_or_gradle = any(
+        basename(p) in {"pom.xml", "build.gradle", "build.gradle.kts"}
+        for p in file_paths
+    )
+    has_test_java = any(
+        p.endswith(".java") and basename(p).startswith("Test") for p in file_paths
+    )
+    if has_maven_or_gradle and has_test_java:
+        frameworks.append("junit")
+
+    return frameworks
+
+
+def fetch_testing_signals(repo: Repository, readme_text: str = "") -> dict[str, Any]:
+    """
+    Extract testing-related signals from a PyGithub Repository object.
+    """
+    result: dict[str, Any] = {
+        "has_tests_folder": False,
+        "test_file_count": 0,
+        "source_file_count": 0,
+        "test_to_source_ratio": None,
+        "detected_test_frameworks": [],
+        "has_ci_config": False,
+        "has_coverage_badge": False,
+        "sample_test_files": [],
+        "sample_ci_files": [],
+    }
+
+    try:
+        git_tree = repo.get_git_tree(repo.default_branch, recursive=True)
+    except GithubException as exc:
+        print(f"[repo_inspector] testing signals tree fetch failed: {exc}", file=sys.stderr)
+        result["has_coverage_badge"] = _detect_coverage_badge(readme_text)
+        return result
+
+    all_paths = [entry.path for entry in git_tree.tree]
+    file_paths = [entry.path for entry in git_tree.tree if entry.type == "blob"]
+
+    for path in all_paths:
+        segments = path.split("/")
+        if any(seg in TEST_DIR_NAMES for seg in segments):
+            result["has_tests_folder"] = True
+            break
+
+    test_files: list[str] = []
+    source_count = 0
+    for path in file_paths:
+        if _is_test_file(path):
+            test_files.append(path)
+        elif _is_source_file(path):
+            source_count += 1
+
+    result["test_file_count"] = len(test_files)
+    result["source_file_count"] = source_count
+    if source_count > 0:
+        result["test_to_source_ratio"] = len(test_files) / source_count
+
+    result["sample_test_files"] = sorted(test_files, key=len)[:5]
+
+    ci_files: list[str] = []
+    for path in file_paths:
+        if path.startswith(".github/workflows/") or path in CI_EXACT_PATHS:
+            ci_files.append(path)
+    if ci_files:
+        result["has_ci_config"] = True
+        result["sample_ci_files"] = ci_files[:3]
+
+    result["detected_test_frameworks"] = _detect_test_frameworks(
+        repo, file_paths, test_files
+    )
+
+    result["has_coverage_badge"] = _detect_coverage_badge(readme_text)
+
+    return result
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python -m agent.utils.repo_inspector <github_repo_url>")
@@ -324,3 +516,17 @@ if __name__ == "__main__":
         print(json.dumps(metrics, indent=2, default=str))
     except GithubException as exc:
         print(f"❌ Maintenance metrics failed: {exc}")
+        repo = None
+
+    print()
+    print("── Testing signals ───────────────")
+    if repo is None:
+        print("(skipped — repo unavailable)")
+    else:
+        try:
+            readme = repo.get_readme()
+            readme_text = readme.decoded_content.decode("utf-8", errors="replace")
+        except GithubException:
+            readme_text = ""
+        signals = fetch_testing_signals(repo, readme_text)
+        print(json.dumps(signals, indent=2, default=str))

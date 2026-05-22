@@ -28,7 +28,7 @@ After V1 ships, re-read this file, re-prioritize, pick top 2 for V2.
 
 ---
 
-## Known bugs (to fix in Day 11-12 polish)
+## Fixed bug (closed Day 4 night)
 
 - **Large-repo file tree truncation**: GitHub API truncates `get_git_tree` results on repos with thousands of files (e.g. fastapi). Testing audit currently miscounts test files for such repos. Fix options:
   1. Implement pagination via `git/trees/{sha}?recursive=1` with multiple calls

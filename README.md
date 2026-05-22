@@ -2,6 +2,45 @@
 
 > Agentic AI system that audits any GitHub repository across architecture, security, documentation, maintenance, and testing dimensions.
 
+## Live Demo
+
+**Production API**: https://repolens-production-61e0.up.railway.app
+
+Try it now:
+- [`/`](https://repolens-production-61e0.up.railway.app/) — service info
+- [`/health`](https://repolens-production-61e0.up.railway.app/health) — health check
+- [`/status`](https://repolens-production-61e0.up.railway.app/status) — runtime configuration
+- [`/audit?repo_url=https://github.com/Haichennn/repolens`](https://repolens-production-61e0.up.railway.app/audit?repo_url=https://github.com/Haichennn/repolens) — full audit of this repo (takes ~30s)
+- [`/docs`](https://repolens-production-61e0.up.railway.app/docs) — interactive API documentation
+
+Or via curl:
+
+```bash
+curl "https://repolens-production-61e0.up.railway.app/audit?repo_url=https://github.com/fastapi/fastapi"
+```
+
+## Example Audit Output
+
+Running Repolens against its own repository (dogfooding):
+
+```json
+{
+  "owner": "Haichennn",
+  "repo_name": "repolens",
+  "overall_score": 62,
+  "overall_severity": "warning",
+  "documentation": { "score": 42, "severity": "warning" },
+  "architecture":  { "score": 72, "severity": "good" },
+  "maintenance":   { "score": 62, "severity": "warning" },
+  "testing":       { "score": 42, "severity": "warning" },
+  "security":      { "score": 78, "severity": "good" }
+}
+```
+
+The Security audit flagged unpinned dependencies; the Testing audit correctly identified an empty tests/ folder; the Architecture audit recognized the new Dockerfile and bumped the score. *The tool surfaces real issues in its own codebase.*
+
+---
+
 **Status**: 🚧 In active development (May - June 2026)
 
 Built with LangChain, LangGraph, MCP, FastAPI, Next.js, and the Anthropic Claude API.

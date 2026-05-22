@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import traceback
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse  # noqa: F401  (reserved for V2 custom error responses)
+from fastapi.responses import JSONResponse, StreamingResponse  # noqa: F401  (JSONResponse reserved for V2)
 
 from agent.graph import app as audit_graph
+from agent.graph import audit_repo_streaming
 from agent.schemas import RepoAuditReport
 
 logging.basicConfig(level=logging.INFO)
@@ -109,3 +111,64 @@ def audit_repo(
             status_code=500,
             detail=f"Audit failed: {type(exc).__name__}: {str(exc)[:200]}",
         )
+
+
+@app.get("/audit/stream")
+async def audit_repo_stream(
+    repo_url: str = Query(..., description="GitHub repository URL to audit (SSE stream)"),
+):
+    """
+    Stream the Repolens audit as Server-Sent Events.
+
+    Each event carries:
+      event: node_complete | error
+      data:  JSON object with the node name plus the node's payload flattened in
+
+    The stream closes after the `aggregate` event fires (or on error). Clients
+    should listen for `event: aggregate` as the signal that the full audit is done.
+    """
+    if not repo_url.startswith(("https://github.com/", "http://github.com/")):
+        raise HTTPException(
+            status_code=400,
+            detail="repo_url must be a valid GitHub URL (https://github.com/owner/repo)",
+        )
+
+    logger.info(f"Starting SSE stream for {repo_url}")
+
+    async def event_generator():
+        try:
+            async for event in audit_repo_streaming(repo_url):
+                event_type = event["type"]
+                node = event["node"]
+                data = event["data"]
+
+                if data is None:
+                    payload: dict = {"node": node}
+                elif hasattr(data, "model_dump"):
+                    payload = {"node": node, **data.model_dump(mode="json")}
+                elif isinstance(data, dict):
+                    payload = {"node": node, **data}
+                else:
+                    payload = {"node": node, "value": str(data)}
+
+                yield f"event: {event_type}\ndata: {json.dumps(payload)}\n\n"
+
+            logger.info(f"SSE stream complete for {repo_url}")
+        except Exception as exc:
+            logger.error(
+                f"SSE audit failed for {repo_url}: {exc}\n{traceback.format_exc()}"
+            )
+            error_payload = json.dumps(
+                {"error": f"{type(exc).__name__}: {str(exc)[:200]}"}
+            )
+            yield f"event: error\ndata: {error_payload}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

@@ -31,7 +31,7 @@ async def _collect_mcp_data(dependencies: list[dict]) -> dict[str, dict]:
     and parallelism here would add complexity without much speedup.
     """
     server_params = StdioServerParameters(
-        command="python",
+        command=sys.executable,
         args=["-m", "mcp_server.server"],
         env=None,
     )

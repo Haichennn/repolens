@@ -19,6 +19,21 @@ Or via curl:
 curl "https://repolens-production-61e0.up.railway.app/audit?repo_url=https://github.com/fastapi/fastapi"
 ```
 
+## Structure
+
+This repo is a monorepo with two components:
+
+```
+repolens/
+├── backend/        Python · FastAPI · LangGraph · MCP server (Anthropic Model Context Protocol)
+└── frontend/       Next.js · TypeScript · Tailwind · shadcn/ui
+```
+
+backend is deployed on Railway via Docker: https://repolens-production-61e0.up.railway.app
+frontend is deployed on Vercel (see Live Demo above)
+
+Each can be developed independently. The frontend calls the backend's `/audit` endpoint over HTTPS.
+
 ## Example Audit Output
 
 Running Repolens against its own repository (dogfooding):

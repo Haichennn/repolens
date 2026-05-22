@@ -38,6 +38,45 @@ frontend is deployed on Vercel (see Live Demo above)
 
 Each can be developed independently. The frontend calls the backend's `/audit` endpoint over HTTPS.
 
+## Quick Start
+
+### Prerequisites
+
+- Python 3.12+
+- Node.js 20+
+- An Anthropic API key ([console.anthropic.com](https://console.anthropic.com))
+- A GitHub personal access token ([github.com/settings/tokens](https://github.com/settings/tokens))
+
+### Local development
+
+```bash
+# Clone
+git clone https://github.com/Haichennn/repolens.git
+cd repolens
+
+# Backend
+cd backend
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env  # Add your ANTHROPIC_API_KEY and GITHUB_TOKEN
+uvicorn api.main:app --reload --port 8000
+
+# Frontend (in a new terminal)
+cd ../frontend
+npm install
+echo "NEXT_PUBLIC_API_BASE=http://localhost:8000" > .env.local
+npm run dev
+```
+
+Open http://localhost:3000 and paste any GitHub URL.
+
+### Production deployment
+
+- Backend deploys to Railway from `/backend/Dockerfile`
+- Frontend deploys to Vercel from `/frontend` (Next.js auto-detected)
+- See `/backend/Dockerfile` and `/frontend/next.config.ts` for build details
+
 ## Example Audit Output
 
 Running Repolens against its own repository (dogfooding):

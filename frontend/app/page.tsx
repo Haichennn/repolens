@@ -1,7 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { AuditDashboard, type AuditSession } from "@/components/AuditDashboard";
+import {
+  AuditDashboard,
+  type AuditDimensionResult,
+  type AuditSession,
+  type DimensionName,
+} from "@/components/AuditDashboard";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ArrowRight } from "lucide-react";
@@ -17,35 +22,112 @@ export default function Home() {
     if (!url.trim()) return;
 
     const sessionId = crypto.randomUUID();
+    const repoUrl = url;
     const newSession: AuditSession = {
       id: sessionId,
-      repoUrl: url,
+      repoUrl,
       status: "running",
       startedAt: Date.now(),
-      fullReport: null,
+      repoMeta: null,
+      dimensions: {
+        documentation: null,
+        architecture: null,
+        maintenance: null,
+        testing: null,
+        security: null,
+      },
+      overallScore: null,
+      overallSeverity: null,
     };
 
     setAudits((prev) => [newSession, ...prev]);
     setUrl("");
 
-    try {
-      const res = await fetch(`${API_BASE}/audit?repo_url=${encodeURIComponent(newSession.repoUrl)}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const report = await res.json();
+    const streamUrl = `${API_BASE}/audit/stream?repo_url=${encodeURIComponent(repoUrl)}`;
+    const eventSource = new EventSource(streamUrl);
+
+    const updateSession = (patch: Partial<AuditSession>) => {
       setAudits((prev) =>
-        prev.map((a) =>
-          a.id === sessionId ? { ...a, status: "complete", fullReport: report } : a
-        )
+        prev.map((a) => (a.id === sessionId ? { ...a, ...patch } : a))
       );
-    } catch (err) {
+    };
+
+    const updateDimension = (dim: DimensionName, result: AuditDimensionResult) => {
       setAudits((prev) =>
         prev.map((a) =>
           a.id === sessionId
-            ? { ...a, status: "error", error: err instanceof Error ? err.message : "unknown error" }
+            ? { ...a, dimensions: { ...a.dimensions, [dim]: result } }
             : a
         )
       );
-    }
+    };
+
+    eventSource.addEventListener("node_complete", (e) => {
+      try {
+        const data = JSON.parse((e as MessageEvent).data);
+        const node = data.node as string;
+        const { node: _drop, ...rest } = data;
+        void _drop;
+
+        if (node === "fetch") {
+          updateSession({
+            repoMeta: { owner: rest.owner, repo_name: rest.repo_name },
+          });
+        } else if (node === "aggregate") {
+          updateSession({
+            overallScore: rest.overall_score,
+            overallSeverity: rest.overall_severity,
+            status: "complete",
+          });
+          eventSource.close();
+        } else if (
+          node === "documentation" ||
+          node === "architecture" ||
+          node === "maintenance" ||
+          node === "testing" ||
+          node === "security"
+        ) {
+          updateDimension(node as DimensionName, rest as AuditDimensionResult);
+        }
+      } catch (err) {
+        console.error("Failed to parse node_complete event:", err);
+      }
+    });
+
+    eventSource.addEventListener("error", (e) => {
+      // Backend-emitted error frame (event: error\ndata: {...}).
+      // Custom-named events do NOT fire the built-in onerror handler — they
+      // only land here.
+      try {
+        const data = JSON.parse((e as MessageEvent).data ?? "{}");
+        updateSession({
+          status: "error",
+          error: data.error || "Audit failed",
+        });
+      } catch {
+        updateSession({ status: "error", error: "Stream error" });
+      }
+      eventSource.close();
+    });
+
+    // Connection-level errors (TCP drop, server crash). Distinct from the
+    // server-emitted "error" event above. Close immediately to suppress the
+    // browser's default auto-retry.
+    eventSource.onerror = () => {
+      if (eventSource.readyState === EventSource.CLOSED) return;
+      setAudits((prev) => {
+        const current = prev.find((a) => a.id === sessionId);
+        if (current?.status === "running") {
+          return prev.map((a) =>
+            a.id === sessionId
+              ? { ...a, status: "error" as const, error: "Connection lost" }
+              : a
+          );
+        }
+        return prev;
+      });
+      eventSource.close();
+    };
   }
 
   return (

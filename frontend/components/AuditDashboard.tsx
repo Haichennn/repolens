@@ -36,7 +36,19 @@ export type AuditSession = {
   repoUrl: string;
   status: "running" | "complete" | "error";
   startedAt: number;
-  fullReport: RepoAuditReport | null;
+
+  // Populated incrementally as SSE events arrive:
+  repoMeta: { owner: string; repo_name: string } | null;
+  dimensions: {
+    documentation: AuditDimensionResult | null;
+    architecture: AuditDimensionResult | null;
+    maintenance: AuditDimensionResult | null;
+    testing: AuditDimensionResult | null;
+    security: AuditDimensionResult | null;
+  };
+  overallScore: number | null;
+  overallSeverity: Severity | null;
+
   error?: string;
 };
 
@@ -52,10 +64,12 @@ function severityColor(severity: Severity | null): string {
 }
 
 function severityLabel(severity: Severity | null, status: AuditSession["status"]): string {
-  if (status === "running") return "RUNNING";
+  // Prefer per-row severity if the dimension has landed — even while the
+  // overall session is still running.
+  if (severity !== null) return severity.toUpperCase();
   if (status === "error") return "ERROR";
-  if (severity === null) return "PENDING";
-  return severity.toUpperCase();
+  if (status === "running") return "RUNNING";
+  return "PENDING";
 }
 
 function shortRepoLabel(url: string): string {
@@ -75,18 +89,22 @@ function elapsed(startedAt: number): string {
 // ─────────── Components ───────────
 
 function ScoreBar({ score, severity, status }: { score: number | null; severity: Severity | null; status: AuditSession["status"] }) {
-  if (status === "running" || score === null) {
-    return (
-      <div className="relative h-[3px] w-full overflow-hidden bg-white/[0.05]">
-        <div
-          className="absolute inset-y-0 w-1/3"
-          style={{
-            background: "linear-gradient(90deg, transparent, oklch(0.7 0 0 / 0.6), transparent)",
-            animation: "scan 1.6s linear infinite",
-          }}
-        />
-      </div>
-    );
+  if (score === null) {
+    if (status === "running") {
+      return (
+        <div className="relative h-[3px] w-full overflow-hidden bg-white/[0.05]">
+          <div
+            className="absolute inset-y-0 w-1/3"
+            style={{
+              background: "linear-gradient(90deg, transparent, oklch(0.7 0 0 / 0.6), transparent)",
+              animation: "scan 1.6s linear infinite",
+            }}
+          />
+        </div>
+      );
+    }
+    // Errored or complete but missing — show static empty bar
+    return <div className="h-[3px] w-full bg-white/[0.05]" />;
   }
 
   return (
@@ -116,7 +134,9 @@ function AuditRow({
   onToggle: () => void;
 }) {
   const isRunning = session.status === "running";
-  const isComplete = session.status === "complete" && result !== null;
+  // Per-row completion: the dim is done as soon as its result lands, even if
+  // siblings are still streaming.
+  const isComplete = result !== null;
   const isError = session.status === "error";
 
   const color = severityColor(result?.severity ?? null);
@@ -219,8 +239,7 @@ function SessionPanel({ session }: { session: AuditSession }) {
     });
   }
 
-  const report = session.fullReport;
-  const overallColor = severityColor(report?.overall_severity ?? null);
+  const overallColor = severityColor(session.overallSeverity);
 
   return (
     <div className="border border-white/[0.06] bg-white/[0.015]">
@@ -231,9 +250,9 @@ function SessionPanel({ session }: { session: AuditSession }) {
           {session.status === "running" && (
             <span className="text-muted-foreground/40">running · {elapsed(session.startedAt)}</span>
           )}
-          {session.status === "complete" && report && (
+          {session.status === "complete" && session.overallScore !== null && (
             <span className="tabular-nums" style={{ color: overallColor }}>
-              {report.overall_score}/100 · {report.overall_severity}
+              {session.overallScore}/100 · {session.overallSeverity}
             </span>
           )}
           {session.status === "error" && <span className="text-red-400/80">error: {session.error}</span>}
@@ -254,7 +273,7 @@ function SessionPanel({ session }: { session: AuditSession }) {
           <AuditRow
             key={dim}
             dimension={dim}
-            result={report?.[dim] ?? null}
+            result={session.dimensions[dim]}
             session={session}
             expanded={expanded.has(dim)}
             onToggle={() => toggle(dim)}

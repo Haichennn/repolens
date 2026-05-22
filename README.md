@@ -4,6 +4,10 @@
 
 ## Live Demo
 
+**Try it live:** [repolens-audit.vercel.app](https://repolens-audit.vercel.app)
+
+Paste any GitHub repo URL, watch five AI agents audit it in parallel, drill into any score for findings and recommendations.
+
 **Production API**: https://repolens-production-61e0.up.railway.app
 
 Try it now:
@@ -58,7 +62,7 @@ The Security audit flagged unpinned dependencies; the Testing audit correctly id
 
 **Status**: 🚧 In active development (May - June 2026)
 
-Built with LangChain, LangGraph, MCP, FastAPI, Next.js, and the Anthropic Claude API.
+Stack: LangGraph (orchestration), LangChain (structured output), MCP (CVE database tools), FastAPI (backend), Next.js (frontend), Anthropic API.
 
 ## Architecture
 

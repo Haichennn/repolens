@@ -135,13 +135,49 @@ class TestingAudit(AuditResult):
     )
 
 
+class SecurityAudit(AuditResult):
+    dependencies_analyzed: int = Field(
+        default=0,
+        description="Total dependencies parsed from manifest files",
+    )
+    vulnerable_dependencies: int = Field(
+        default=0,
+        description="Dependencies with at least one known CVE",
+    )
+    critical_cve_count: int = Field(
+        default=0,
+        description="Number of CRITICAL severity CVEs found",
+    )
+    high_cve_count: int = Field(
+        default=0,
+        description="Number of HIGH severity CVEs found",
+    )
+    medium_cve_count: int = Field(
+        default=0,
+        description="Number of MEDIUM severity CVEs found",
+    )
+    deprecated_dependencies: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Names of dependencies flagged as deprecated by the package registry"
+        ),
+    )
+    manifest_files_found: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Which manifest files were detected (e.g. 'requirements.txt', "
+            "'package.json')"
+        ),
+    )
+
+
 class RepoAuditReport(BaseModel):
     repo_url: str
     owner: str
     repo_name: str
     documentation: DocumentationAudit | None = None
     architecture: ArchitectureAudit | None = None
-    security: AuditResult | None = None
+    security: SecurityAudit | None = None
     maintenance: MaintenanceAudit | None = None
     testing: TestingAudit | None = None
     overall_score: int | None = Field(default=None, ge=0, le=100)

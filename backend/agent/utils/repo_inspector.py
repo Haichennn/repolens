@@ -8,6 +8,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+try:
+    import tomllib  # Python 3.11+
+except ImportError:
+    tomllib = None  # type: ignore[assignment]
+
 from dotenv import load_dotenv
 from github import Github
 from github.GithubException import GithubException
@@ -484,6 +489,149 @@ def fetch_testing_signals(repo: Repository, readme_text: str = "") -> dict[str, 
     return result
 
 
+_DEP_NAME_VERSION_RE = re.compile(
+    r"^([A-Za-z0-9_.\-]+)\s*([<>=!~]=?\s*[A-Za-z0-9_.\-+*]+)?"
+)
+
+
+def _parse_requirements_txt(content: str) -> list[dict[str, Any]]:
+    deps: list[dict[str, Any]] = []
+    for raw_line in content.splitlines():
+        line = raw_line.split("#", 1)[0].strip()
+        if not line or line.startswith("-"):
+            continue
+        line = re.sub(r"\[.*?\]", "", line)
+        m = _DEP_NAME_VERSION_RE.match(line)
+        if not m:
+            continue
+        name = m.group(1).lower()
+        version_spec = m.group(2).strip() if m.group(2) else ""
+        deps.append(
+            {
+                "name": name,
+                "version": version_spec or "unspecified",
+                "ecosystem": "PyPI",
+                "dev": False,
+            }
+        )
+    return deps
+
+
+def _parse_package_json(content: str) -> list[dict[str, Any]]:
+    data = json.loads(content)
+    deps: list[dict[str, Any]] = []
+    for section, is_dev in [("dependencies", False), ("devDependencies", True)]:
+        for name, version in (data.get(section) or {}).items():
+            deps.append(
+                {
+                    "name": name.lower(),
+                    "version": str(version),
+                    "ecosystem": "npm",
+                    "dev": is_dev,
+                }
+            )
+    return deps
+
+
+def _parse_pyproject_toml(content: str) -> list[dict[str, Any]]:
+    if tomllib is None:
+        raise RuntimeError("tomllib not available (requires Python 3.11+)")
+    data = tomllib.loads(content)
+    deps: list[dict[str, Any]] = []
+
+    for raw in (data.get("project") or {}).get("dependencies", []) or []:
+        m = _DEP_NAME_VERSION_RE.match(raw)
+        if m:
+            deps.append(
+                {
+                    "name": m.group(1).lower(),
+                    "version": m.group(2).strip() if m.group(2) else "unspecified",
+                    "ecosystem": "PyPI",
+                    "dev": False,
+                }
+            )
+
+    poetry_deps = (
+        (data.get("tool") or {}).get("poetry", {}).get("dependencies", {})
+    )
+    for name, spec in poetry_deps.items():
+        if name.lower() == "python":
+            continue
+        if isinstance(spec, str):
+            version: str | None = spec
+        elif isinstance(spec, dict):
+            version = spec.get("version")
+        else:
+            version = None
+        deps.append(
+            {
+                "name": name.lower(),
+                "version": str(version) if version else "unspecified",
+                "ecosystem": "PyPI",
+                "dev": False,
+            }
+        )
+
+    return deps
+
+
+def fetch_dependencies(repo: Repository) -> dict[str, Any]:
+    """
+    Parse dependency manifests from a GitHub repository.
+
+    Supports the most common ecosystems:
+      - Python: requirements.txt, pyproject.toml (PEP 621 + Poetry)
+      - Node.js: package.json (dependencies + devDependencies)
+    """
+    manifest_files_found: list[str] = []
+    all_deps: list[dict[str, Any]] = []
+    parse_errors: list[str] = []
+
+    manifest_locations: list[tuple[str, Any]] = [
+        ("requirements.txt", _parse_requirements_txt),
+        ("backend/requirements.txt", _parse_requirements_txt),
+        ("package.json", _parse_package_json),
+        ("pyproject.toml", _parse_pyproject_toml),
+    ]
+
+    for path, parser in manifest_locations:
+        try:
+            content_file = repo.get_contents(path)
+        except GithubException:
+            continue
+        except Exception as exc:
+            parse_errors.append(f"{path}: unexpected error: {exc}")
+            continue
+
+        if isinstance(content_file, list):
+            continue
+
+        if not hasattr(content_file, "decoded_content"):
+            continue
+
+        content = content_file.decoded_content.decode("utf-8", errors="replace")
+        try:
+            parsed = parser(content)
+            all_deps.extend(parsed)
+            manifest_files_found.append(path)
+        except Exception as exc:
+            parse_errors.append(f"{path}: {type(exc).__name__}: {exc}")
+
+    seen: dict[tuple[str, str], dict[str, Any]] = {}
+    for dep in all_deps:
+        key = (dep["name"], dep["ecosystem"])
+        if key not in seen or (seen[key]["dev"] and not dep["dev"]):
+            seen[key] = dep
+    deduped = list(seen.values())
+
+    return {
+        "manifest_files_found": manifest_files_found,
+        "dependencies": deduped,
+        "total_count": len(deduped),
+        "parse_errors": parse_errors,
+    }
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python -m agent.utils.repo_inspector <github_repo_url>")
@@ -536,3 +684,16 @@ if __name__ == "__main__":
             readme_text = ""
         signals = fetch_testing_signals(repo, readme_text)
         print(json.dumps(signals, indent=2, default=str))
+
+    print()
+    print("── Dependencies ──────────────────")
+    if repo is None:
+        print("(skipped — repo unavailable)")
+    else:
+        deps_info = fetch_dependencies(repo)
+        print(f"Manifest files: {deps_info['manifest_files_found']}")
+        print(f"Total deps:     {deps_info['total_count']}")
+        for d in deps_info["dependencies"][:10]:
+            print(f"  - {d['name']} {d['version']} ({d['ecosystem']}, dev={d['dev']})")
+        if deps_info["parse_errors"]:
+            print(f"Parse errors:   {deps_info['parse_errors']}")

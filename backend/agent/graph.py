@@ -184,6 +184,12 @@ if __name__ == "__main__":
         print("Usage: python -m agent.graph <github_url>")
         sys.exit(1)
 
+    if len(sys.argv) >= 2 and sys.argv[1] in ("--viz", "--graph"):
+        print("Mermaid graph (paste into https://mermaid.live):")
+        print()
+        print(app.get_graph().draw_mermaid())
+        sys.exit(0)
+
     result = app.invoke({"repo_url": sys.argv[1]})
 
     report = result.get("final_report")

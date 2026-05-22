@@ -3,10 +3,12 @@
 import { useState } from "react";
 import {
   AuditDashboard,
+  type ActiveTab,
   type AuditDimensionResult,
   type AuditSession,
   type DecisionMemo,
   type DimensionName,
+  type DueDiligenceReport,
 } from "@/components/AuditDashboard";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -40,6 +42,8 @@ export default function Home() {
       overallScore: null,
       overallSeverity: null,
       memo: { status: "idle" },
+      dueDiligence: { status: "idle" },
+      activeTab: "memo",
     };
 
     setAudits((prev) => [newSession, ...prev]);
@@ -183,6 +187,65 @@ export default function Home() {
     }
   }
 
+  async function runDueDiligence(sessionId: string) {
+    const current = audits.find((a) => a.id === sessionId);
+    if (!current || current.status !== "complete") return;
+    if (current.overallScore === null || current.overallSeverity === null) return;
+
+    setAudits((prev) =>
+      prev.map((a) =>
+        a.id === sessionId
+          ? { ...a, dueDiligence: { status: "loading", startedAt: Date.now() } }
+          : a
+      )
+    );
+
+    const payload = {
+      repo_url: current.repoUrl,
+      owner: current.repoMeta?.owner ?? "",
+      repo_name: current.repoMeta?.repo_name ?? "",
+      documentation: current.dimensions.documentation,
+      architecture: current.dimensions.architecture,
+      maintenance: current.dimensions.maintenance,
+      testing: current.dimensions.testing,
+      security: current.dimensions.security,
+      overall_score: current.overallScore,
+      overall_severity: current.overallSeverity,
+    };
+
+    try {
+      const res = await fetch(`${API_BASE}/due-diligence`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const report = (await res.json()) as DueDiligenceReport;
+      setAudits((prev) =>
+        prev.map((a) =>
+          a.id === sessionId
+            ? { ...a, dueDiligence: { status: "complete", report } }
+            : a
+        )
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      setAudits((prev) =>
+        prev.map((a) =>
+          a.id === sessionId
+            ? { ...a, dueDiligence: { status: "error", error: message } }
+            : a
+        )
+      );
+    }
+  }
+
+  function setActiveTab(sessionId: string, tab: ActiveTab) {
+    setAudits((prev) =>
+      prev.map((a) => (a.id === sessionId ? { ...a, activeTab: tab } : a))
+    );
+  }
+
   return (
     <div className="relative min-h-screen">
       {/* Subtle grid texture, no orbs, no gradient noise */}
@@ -285,7 +348,12 @@ export default function Home() {
       {/* Audit dashboard — only shown when audits exist */}
       {audits.length > 0 && (
         <section className="relative z-10 mx-auto max-w-6xl px-6 pb-32">
-          <AuditDashboard audits={audits} onGenerateMemo={runMemo} />
+          <AuditDashboard
+            audits={audits}
+            onGenerateMemo={runMemo}
+            onGenerateDueDiligence={runDueDiligence}
+            onSetActiveTab={setActiveTab}
+          />
         </section>
       )}
 

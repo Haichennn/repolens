@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -182,3 +183,40 @@ class RepoAuditReport(BaseModel):
     testing: TestingAudit | None = None
     overall_score: int | None = Field(default=None, ge=0, le=100)
     overall_severity: Severity | None = None
+
+
+class DecisionMemo(BaseModel):
+    """
+    Short human-readable decision memo derived from an audit.
+    Designed for ~200 words total, scannable in 30 seconds.
+    """
+
+    repo_url: str
+    overall_score: int
+
+    verdict: Literal["adopt", "adopt_with_caution", "pass"]
+    verdict_rationale: str = Field(
+        description="One sentence explaining the verdict. ~20 words."
+    )
+
+    strengths: list[str] = Field(
+        description="3-4 bullets. Each ~15 words. Evidence-cited (mention dimension or metric).",
+        min_length=2,
+        max_length=4,
+    )
+    concerns: list[str] = Field(
+        description="3-4 bullets. Each ~15 words. Cite which audit dimension flagged it.",
+        min_length=2,
+        max_length=4,
+    )
+
+    next_steps_if_adopting: list[str] = Field(
+        description="2-3 concrete actions a team should take before/during adoption. Each ~10 words.",
+        min_length=2,
+        max_length=3,
+    )
+    red_flags_to_monitor: list[str] = Field(
+        description="2-3 things to watch over time. Each ~10 words.",
+        min_length=2,
+        max_length=3,
+    )

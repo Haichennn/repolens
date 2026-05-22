@@ -11,7 +11,8 @@ from fastapi.responses import JSONResponse, StreamingResponse  # noqa: F401  (JS
 
 from agent.graph import app as audit_graph
 from agent.graph import audit_repo_streaming
-from agent.schemas import RepoAuditReport
+from agent.nodes.memo import generate_memo
+from agent.schemas import DecisionMemo, RepoAuditReport
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("repolens.api")
@@ -172,3 +173,19 @@ async def audit_repo_stream(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@app.post("/memo", response_model=DecisionMemo)
+def memo(report: RepoAuditReport):
+    """Generate a decision memo from a completed audit report."""
+    logger.info(f"Generating memo for: {report.repo_url}")
+    try:
+        memo = generate_memo(report)
+        logger.info(f"Memo generated. Verdict: {memo.verdict}")
+        return memo
+    except Exception as exc:
+        logger.error(f"Memo generation failed: {exc}\n{traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Memo generation failed: {str(exc)[:200]}",
+        )

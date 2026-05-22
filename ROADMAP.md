@@ -66,6 +66,9 @@ Repolens becomes a **dependency due-diligence platform**: paste a `package.json`
 
 ## V3 Vision (post-V2 ship)
 
+**Local repo audit (pre-push)**
+Currently Repolens audits public GitHub URLs. But users often need to audit a repo BEFORE pushing — for example, doing a final quality check before submitting code to a manager or mentor. The workflow is: select a local folder or upload a zip, Repolens runs the same 5-dimensional audit on local files, returns a structured report. Requires file upload UI, local file system traversal in the backend, and bypassing the GitHub API path. This is the natural next infrastructure step — bringing Repolens into the pre-commit / pre-PR workflow.
+
 **Audit history + score trajectory**
 Users often re-audit the same repo iteratively as they fix issues. Track audits per repo over time, render score curves, surface "improved by X points" deltas. Persistence layer (Postgres) required.
 

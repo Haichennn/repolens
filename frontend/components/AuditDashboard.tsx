@@ -137,7 +137,6 @@ function AuditRow({
   // Per-row completion: the dim is done as soon as its result lands, even if
   // siblings are still streaming.
   const isComplete = result !== null;
-  const isError = session.status === "error";
 
   const color = severityColor(result?.severity ?? null);
   const label = severityLabel(result?.severity ?? null, session.status);

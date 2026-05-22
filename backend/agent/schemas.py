@@ -220,3 +220,65 @@ class DecisionMemo(BaseModel):
         min_length=2,
         max_length=3,
     )
+
+
+class DependencyAssessment(BaseModel):
+    """Per-dependency due diligence assessment."""
+
+    package_name: str
+    ecosystem: Literal["pypi", "npm"] = Field(
+        description="Package registry: pypi for Python, npm for JS/TS"
+    )
+    declared_version: str | None = Field(
+        description="Version constraint from manifest, e.g. '==1.2.3' or '^1.2.3', or None if unpinned"
+    )
+
+    last_release_date: str | None = Field(description="ISO date of most recent release")
+    days_since_last_release: int | None = None
+
+    monthly_downloads: int | None = Field(
+        description="Last 30 days download count from registry"
+    )
+    popularity_tier: Literal["very_high", "high", "medium", "low", "unknown"] = "unknown"
+
+    license: str | None = Field(description="SPDX license identifier")
+    license_compatible_commercial: bool | None = Field(
+        description="True if license permits commercial use"
+    )
+
+    risk_level: Literal["low", "medium", "high", "critical"]
+    risk_factors: list[str] = Field(
+        description="Short bullets, 1-3 items, cite metrics",
+        max_length=3,
+    )
+    alternative_packages: list[str] = Field(
+        description="Suggested alternatives if risk_level >= high. Empty otherwise.",
+        max_length=3,
+    )
+    alternative_reasoning: str | None = Field(
+        description="One sentence reasoning if alternatives are suggested"
+    )
+
+
+class DueDiligenceReport(BaseModel):
+    """Full supply-chain due diligence report."""
+
+    repo_url: str
+    total_dependencies: int
+    python_dependencies: int = 0
+    node_dependencies: int = 0
+    dependencies: list[DependencyAssessment]
+
+    overall_risk_level: Literal["low", "medium", "high", "critical"]
+    overall_summary: str = Field(description="2-3 sentence executive summary")
+
+    high_risk_count: int = 0
+    medium_risk_count: int = 0
+    abandoned_packages: list[str] = Field(
+        default_factory=list,
+        description="Names with no release >1 year",
+    )
+    commercial_blockers: list[str] = Field(
+        default_factory=list,
+        description="Names with copyleft/non-commercial licenses",
+    )

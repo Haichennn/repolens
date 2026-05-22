@@ -11,8 +11,9 @@ from fastapi.responses import JSONResponse, StreamingResponse  # noqa: F401  (JS
 
 from agent.graph import app as audit_graph
 from agent.graph import audit_repo_streaming
+from agent.nodes.due_diligence import assess_dependencies
 from agent.nodes.memo import generate_memo
-from agent.schemas import DecisionMemo, RepoAuditReport
+from agent.schemas import DecisionMemo, DueDiligenceReport, RepoAuditReport
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("repolens.api")
@@ -188,4 +189,25 @@ def memo(report: RepoAuditReport):
         raise HTTPException(
             status_code=500,
             detail=f"Memo generation failed: {str(exc)[:200]}",
+        )
+
+
+@app.post("/due-diligence", response_model=DueDiligenceReport)
+async def due_diligence(report: RepoAuditReport):
+    """Generate dependency due diligence report."""
+    logger.info(f"Generating due diligence for: {report.repo_url}")
+    try:
+        result = await assess_dependencies(report)
+        logger.info(
+            f"Due diligence: {result.overall_risk_level} risk, "
+            f"{result.high_risk_count} high-risk deps"
+        )
+        return result
+    except Exception as exc:
+        logger.error(
+            f"Due diligence failed for {report.repo_url}: {exc}\n{traceback.format_exc()}"
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Due diligence failed: {str(exc)[:200]}",
         )

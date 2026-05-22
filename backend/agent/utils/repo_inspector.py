@@ -510,7 +510,7 @@ def _parse_requirements_txt(content: str) -> list[dict[str, Any]]:
             {
                 "name": name,
                 "version": version_spec or "unspecified",
-                "ecosystem": "PyPI",
+                "ecosystem": "pypi",
                 "dev": False,
             }
         )
@@ -546,7 +546,7 @@ def _parse_pyproject_toml(content: str) -> list[dict[str, Any]]:
                 {
                     "name": m.group(1).lower(),
                     "version": m.group(2).strip() if m.group(2) else "unspecified",
-                    "ecosystem": "PyPI",
+                    "ecosystem": "pypi",
                     "dev": False,
                 }
             )
@@ -567,7 +567,7 @@ def _parse_pyproject_toml(content: str) -> list[dict[str, Any]]:
             {
                 "name": name.lower(),
                 "version": str(version) if version else "unspecified",
-                "ecosystem": "PyPI",
+                "ecosystem": "pypi",
                 "dev": False,
             }
         )
@@ -591,6 +591,7 @@ def fetch_dependencies(repo: Repository) -> dict[str, Any]:
         ("requirements.txt", _parse_requirements_txt),
         ("backend/requirements.txt", _parse_requirements_txt),
         ("package.json", _parse_package_json),
+        ("frontend/package.json", _parse_package_json),
         ("pyproject.toml", _parse_pyproject_toml),
     ]
 

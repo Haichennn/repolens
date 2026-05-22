@@ -6,6 +6,7 @@ import {
   type ActiveTab,
   type AuditDimensionResult,
   type AuditSession,
+  type ComparisonGroup,
   type DecisionMemo,
   type DimensionName,
   type DueDiligenceReport,
@@ -16,18 +17,39 @@ import { ArrowRight } from "lucide-react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "https://repolens-production-61e0.up.railway.app";
 
+function groupByComparison(audits: AuditSession[]): ComparisonGroup[] {
+  const map = new Map<string, AuditSession[]>();
+  for (const session of audits) {
+    if (!map.has(session.groupId)) map.set(session.groupId, []);
+    map.get(session.groupId)!.push(session);
+  }
+
+  return Array.from(map.entries())
+    .map(([id, sessions]) => ({
+      id,
+      sessions: [...sessions].sort((a, b) => a.startedAt - b.startedAt),
+      createdAt: Math.min(...sessions.map((s) => s.startedAt)),
+    }))
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+
 export default function Home() {
   const [url, setUrl] = useState("");
   const [audits, setAudits] = useState<AuditSession[]>([]);
 
-  async function runAudit(e: React.FormEvent) {
+  function handleFormSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!url.trim()) return;
+    runAudit(url.trim());
+    setUrl("");
+  }
 
+  async function runAudit(repoUrl: string, groupId?: string) {
+    const finalGroupId = groupId ?? crypto.randomUUID();
     const sessionId = crypto.randomUUID();
-    const repoUrl = url;
     const newSession: AuditSession = {
       id: sessionId,
+      groupId: finalGroupId,
       repoUrl,
       status: "running",
       startedAt: Date.now(),
@@ -47,7 +69,6 @@ export default function Home() {
     };
 
     setAudits((prev) => [newSession, ...prev]);
-    setUrl("");
 
     const streamUrl = `${API_BASE}/audit/stream?repo_url=${encodeURIComponent(repoUrl)}`;
     const eventSource = new EventSource(streamUrl);
@@ -296,11 +317,11 @@ export default function Home() {
             <h1 className="mb-6 font-mono text-4xl font-medium leading-[1.1] tracking-tight md:text-5xl">
               See what you&apos;re committing to.
             </h1>
-            <p className="mb-10 max-w-md text-sm leading-relaxed text-muted-foreground">
+            <p className="mb-10 max-w-md text-[15px] leading-relaxed text-muted-foreground">
               Repolens turns any GitHub URL into a structured read. Today: five-dimensional audit. Next: decision memos, dependency due diligence.
             </p>
 
-            <form onSubmit={runAudit} autoComplete="off" className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <form onSubmit={handleFormSubmit} autoComplete="off" className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <Input
                 type="url"
                 required
@@ -324,8 +345,8 @@ export default function Home() {
           {/* Right: meta / specs */}
           <div className="hidden md:flex md:flex-col md:justify-center md:gap-6 md:border-l md:border-white/[0.06] md:pl-12">
             <div className="font-mono text-xs">
-              <div className="mb-2 text-muted-foreground/50">DIMENSIONS</div>
-              <div className="space-y-1 text-foreground/80">
+              <div className="mb-2 font-medium text-muted-foreground/80">DIMENSIONS</div>
+              <div className="space-y-1 text-foreground/90">
                 <div>documentation</div>
                 <div>architecture</div>
                 <div>maintenance</div>
@@ -334,8 +355,8 @@ export default function Home() {
               </div>
             </div>
             <div className="font-mono text-xs">
-              <div className="mb-2 text-muted-foreground/50">ROADMAP</div>
-              <div className="space-y-1 text-foreground/80">
+              <div className="mb-2 font-medium text-muted-foreground/80">ROADMAP</div>
+              <div className="space-y-1 text-foreground/90">
                 <div>decision memos</div>
                 <div>due diligence</div>
                 <div>comparative ranking</div>
@@ -349,10 +370,11 @@ export default function Home() {
       {audits.length > 0 && (
         <section className="relative z-10 mx-auto max-w-6xl px-6 pb-32">
           <AuditDashboard
-            audits={audits}
+            groups={groupByComparison(audits)}
             onGenerateMemo={runMemo}
             onGenerateDueDiligence={runDueDiligence}
             onSetActiveTab={setActiveTab}
+            onAddToComparison={runAudit}
           />
         </section>
       )}

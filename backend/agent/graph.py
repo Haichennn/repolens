@@ -1,103 +1,178 @@
 from __future__ import annotations
 
 import os
-import re
 import sys
 from pathlib import Path
-from typing import TypedDict
+from typing import Optional, TypedDict
 
 from dotenv import load_dotenv
-from github import Github
-from github.GithubException import GithubException, UnknownObjectException
-from langchain_anthropic import ChatAnthropic
-from langchain_core.prompts import ChatPromptTemplate
+from github import Github, GithubException
 from langgraph.graph import END, START, StateGraph
 
-BACKEND_DIR = Path(__file__).resolve().parents[1]
-load_dotenv(BACKEND_DIR / ".env")
-
-GITHUB_URL_RE = re.compile(
-    r"^https?://github\.com/(?P<owner>[^/\s]+)/(?P<repo>[^/\s#?]+?)(?:\.git)?/?$"
+from agent.nodes.architecture import audit_architecture
+from agent.nodes.documentation import audit_documentation
+from agent.nodes.maintenance import audit_maintenance
+from agent.nodes.security import audit_security
+from agent.nodes.testing import audit_testing
+from agent.schemas import (
+    ArchitectureAudit,
+    DocumentationAudit,
+    MaintenanceAudit,
+    RepoAuditReport,
+    SecurityAudit,
+    Severity,
+    TestingAudit,
 )
+from agent.utils.repo_inspector import parse_repo_url
 
-README_MAX_CHARS = 3000
+_ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
+load_dotenv(_ENV_PATH)
 
 
-class RepoState(TypedDict):
+class AuditState(TypedDict, total=False):
     repo_url: str
+
     owner: str
     repo_name: str
     readme_text: str
-    summary: str
-    error: str | None
+    fetch_error: Optional[str]
+
+    documentation_audit: Optional[DocumentationAudit]
+    architecture_audit: Optional[ArchitectureAudit]
+    maintenance_audit: Optional[MaintenanceAudit]
+    testing_audit: Optional[TestingAudit]
+    security_audit: Optional[SecurityAudit]
+
+    final_report: Optional[RepoAuditReport]
 
 
-def fetch_readme(state: RepoState) -> dict:
-    url = state["repo_url"].strip()
-    match = GITHUB_URL_RE.match(url)
-    if not match:
-        return {"error": f"Invalid GitHub URL: {url!r}"}
+def fetch_repo(state: AuditState) -> dict:
+    """
+    Fetch repo metadata + README once. The actual audit nodes do their own
+    additional fetches (architecture pulls file tree, maintenance pulls
+    commits, etc.) — this just primes the basic identity + README.
+    """
+    try:
+        owner, repo_name = parse_repo_url(state["repo_url"])
+    except Exception as exc:
+        return {"fetch_error": f"URL parse failed: {exc}"}
 
-    owner = match.group("owner")
-    repo_name = match.group("repo")
+    token = os.getenv("GITHUB_TOKEN")
+    gh = Github(token) if token else Github()
 
     try:
-        gh = Github(os.getenv("GITHUB_TOKEN")) if os.getenv("GITHUB_TOKEN") else Github()
-        repository = gh.get_repo(f"{owner}/{repo_name}")
-        readme = repository.get_readme()
-    except UnknownObjectException:
+        repo = gh.get_repo(f"{owner}/{repo_name}")
+        try:
+            readme = repo.get_readme()
+            readme_text = readme.decoded_content.decode("utf-8", errors="replace")[:3000]
+        except GithubException:
+            readme_text = ""
+
         return {
             "owner": owner,
             "repo_name": repo_name,
-            "error": "No README found in this repo",
+            "readme_text": readme_text,
         }
     except GithubException as exc:
+        return {"fetch_error": f"Repo access failed: {exc}"}
+
+
+def aggregate(state: AuditState) -> dict:
+    """
+    Combine the 5 audit results into a single RepoAuditReport.
+    Overall score is a weighted average; severity follows from score thresholds.
+    """
+    if state.get("fetch_error"):
         return {
-            "owner": owner,
-            "repo_name": repo_name,
-            "error": f"GitHub API error: {exc.data.get('message', str(exc))}",
+            "final_report": RepoAuditReport(
+                repo_url=state["repo_url"],
+                owner=state.get("owner", "unknown"),
+                repo_name=state.get("repo_name", "unknown"),
+                overall_score=0,
+                overall_severity=Severity.CRITICAL,
+            )
         }
 
-    readme_text = readme.decoded_content.decode("utf-8", errors="replace")
-    if len(readme_text) > README_MAX_CHARS:
-        readme_text = readme_text[:README_MAX_CHARS]
+    doc = state.get("documentation_audit")
+    arch = state.get("architecture_audit")
+    maint = state.get("maintenance_audit")
+    test = state.get("testing_audit")
+    sec = state.get("security_audit")
 
-    return {
-        "owner": owner,
-        "repo_name": repo_name,
-        "readme_text": readme_text,
+    weights = {
+        "documentation": 0.15,
+        "architecture": 0.25,
+        "maintenance": 0.20,
+        "testing": 0.15,
+        "security": 0.25,
     }
 
+    components = [
+        (doc.score if doc else None, "documentation"),
+        (arch.score if arch else None, "architecture"),
+        (maint.score if maint else None, "maintenance"),
+        (test.score if test else None, "testing"),
+        (sec.score if sec else None, "security"),
+    ]
 
-def summarize_readme(state: RepoState) -> dict:
-    if state.get("error"):
-        return {"summary": "Skipped: " + state["error"]}
+    valid = [(score, weights[dim]) for score, dim in components if score is not None]
+    if valid:
+        total_weight = sum(w for _, w in valid)
+        weighted_sum = sum(s * w for s, w in valid)
+        overall_score = round(weighted_sum / total_weight)
+    else:
+        overall_score = 0
 
-    llm = ChatAnthropic(model="claude-sonnet-4-5-20250929", temperature=0)
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", "You are Repolens, an expert repository auditor."),
-            (
-                "human",
-                "Read this README excerpt and tell me in exactly 3 sentences "
-                "what this repository does, who it's for, and what tech stack "
-                "it uses.\n\nREADME:\n{readme_text}",
-            ),
-        ]
+    if overall_score >= 70:
+        overall_severity = Severity.GOOD
+    elif overall_score >= 40:
+        overall_severity = Severity.WARNING
+    else:
+        overall_severity = Severity.CRITICAL
+
+    report = RepoAuditReport(
+        repo_url=state["repo_url"],
+        owner=state["owner"],
+        repo_name=state["repo_name"],
+        documentation=doc,
+        architecture=arch,
+        maintenance=maint,
+        testing=test,
+        security=sec,
+        overall_score=overall_score,
+        overall_severity=overall_severity,
     )
-    chain = prompt | llm
-    response = chain.invoke({"readme_text": state["readme_text"]})
-    summary = response.content if isinstance(response.content, str) else str(response.content)
-    return {"summary": summary}
+
+    return {"final_report": report}
 
 
 def build_graph():
-    graph = StateGraph(RepoState)
-    graph.add_node("fetch", fetch_readme)
-    graph.add_node("summarize", summarize_readme)
+    graph = StateGraph(AuditState)
+
+    graph.add_node("fetch", fetch_repo)
+    graph.add_node("documentation", audit_documentation)
+    graph.add_node("architecture", audit_architecture)
+    graph.add_node("maintenance", audit_maintenance)
+    graph.add_node("testing", audit_testing)
+    graph.add_node("security", audit_security)
+    graph.add_node("aggregate", aggregate)
+
     graph.add_edge(START, "fetch")
-    graph.add_edge("fetch", "summarize")
-    graph.add_edge("summarize", END)
+
+    graph.add_edge("fetch", "documentation")
+    graph.add_edge("fetch", "architecture")
+    graph.add_edge("fetch", "maintenance")
+    graph.add_edge("fetch", "testing")
+    graph.add_edge("fetch", "security")
+
+    graph.add_edge("documentation", "aggregate")
+    graph.add_edge("architecture", "aggregate")
+    graph.add_edge("maintenance", "aggregate")
+    graph.add_edge("testing", "aggregate")
+    graph.add_edge("security", "aggregate")
+
+    graph.add_edge("aggregate", END)
+
     return graph.compile()
 
 
@@ -105,18 +180,49 @@ app = build_graph()
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python -m agent.graph <github_repo_url>")
+    if len(sys.argv) != 2:
+        print("Usage: python -m agent.graph <github_url>")
         sys.exit(1)
 
     result = app.invoke({"repo_url": sys.argv[1]})
 
-    if result.get("error"):
-        print(f"❌ Error: {result['error']}")
+    report = result.get("final_report")
+    if report is None:
+        print("❌ No report generated.")
         sys.exit(1)
 
-    divider = "─────────────────────────────────"
-    print(f"📦 Repository: {result['owner']}/{result['repo_name']}")
-    print(divider)
-    print(result["summary"])
-    print(divider)
+    print()
+    print("=" * 70)
+    print(f"📦 Repolens Audit: {report.owner}/{report.repo_name}")
+    print("=" * 70)
+    print(
+        f"\n🎯 Overall Score: {report.overall_score}/100 "
+        f"[{report.overall_severity.value.upper()}]\n"
+    )
+
+    for dim_name, audit in [
+        ("Documentation", report.documentation),
+        ("Architecture", report.architecture),
+        ("Maintenance", report.maintenance),
+        ("Testing", report.testing),
+        ("Security", report.security),
+    ]:
+        if audit is None:
+            print(f"  ⚠️  {dim_name:14} — (skipped or failed)")
+        else:
+            if audit.severity == Severity.GOOD:
+                icon = "✅"
+            elif audit.severity == Severity.WARNING:
+                icon = "⚠️ "
+            else:
+                icon = "🔴"
+            print(
+                f"  {icon} {dim_name:14} {audit.score:3}/100  "
+                f"[{audit.severity.value}]  {audit.summary[:80]}"
+            )
+
+    print()
+    print("=" * 70)
+    print("Full JSON report:")
+    print("=" * 70)
+    print(report.model_dump_json(indent=2))

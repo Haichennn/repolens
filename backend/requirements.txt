@@ -3,8 +3,9 @@ langgraph>=0.2
 langchain-anthropic>=0.3
 anthropic
 fastapi
-uvicorn
+uvicorn[standard]
 python-dotenv
 pydantic
 httpx
 pygithub
+mcp

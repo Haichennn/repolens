@@ -25,6 +25,21 @@ app.add_middleware(
 )
 
 
+@app.get("/")
+async def root():
+    return {
+        "service": "Repolens",
+        "tagline": "Agentic AI auditor for GitHub repositories",
+        "endpoints": {
+            "/health": "Health check",
+            "/status": "Service status + configuration",
+            "/audit": "Audit a GitHub repo (query param: repo_url)",
+            "/docs": "Interactive API documentation"
+        },
+        "github": "https://github.com/Haichennn/repolens"
+    }
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "repolens"}
